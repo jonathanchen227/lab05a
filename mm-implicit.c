@@ -4,7 +4,9 @@
  * TODO (bug): mm_realloc and mm_calloc don't seem to be working...
  * TODO (bug): The allocator doesn't re-use space very well...
  */
-
+#include <stddef.h>
+#include <string.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "mm.h"
@@ -94,32 +96,47 @@ bool mm_init(void) {
  * mm_malloc - Allocates a block with the given size
  */
 void *mm_malloc(size_t size) {
+     if ( size == 0 ) {
+	     return NULL;
+    }
     // The block must have enough space for a header and be 16-byte aligned
     size = round_up(sizeof(block_t) + size, ALIGNMENT);
 
     // If there is a large enough free block, use it
     block_t *block = find_fit(size);
     if (block != NULL) {
-        set_header(block, get_size(block), true);
-        return block->payload;
+          size_t old_size = get_size(block);
+	 
+	  if ( old_size >= size+sizeof(block_t) + ALIGNMENT ) {
+		  set_header(block,size,true);
+		  block_t * free_block =(block_t*) ((uint8_t*) block + size);
+		  set_header(free_block,old_size - size,false);
+		  if ( block == mm_heap_last) {
+			  mm_heap_last = free_block;
+		  }
+	 } else {
+		 set_header(block,old_size,true);
+	}
+	  return block->payload;
     }
-
-    // Otherwise, a new block needs to be allocated at the end of the heap
     block = mem_sbrk(size);
-    if (block == (void *) -1) {
-        return NULL;
+    if (block == (void*) - 1 ) {
+	    return NULL;
     }
-
-    // Update mm_heap_first and mm_heap_last since we extended the heap
-    if (mm_heap_first == NULL) {
-        mm_heap_first = block;
+    if ( mm_heap_first == NULL ) {
+	    mm_heap_first = block;
     }
     mm_heap_last = block;
-
-    // Initialize the block with the allocated size
-    set_header(block, size, true);
+    set_header(block,size,true);
     return block->payload;
 }
+
+    // Otherwise, a new block needs to be allocated at the end of the heap
+
+    // Update mm_heap_first and mm_heap_last since we extended the heap
+   
+
+    // Initialize the block
 
 /**
  * mm_free - Releases a block to be reused for future allocations
@@ -140,18 +157,43 @@ void mm_free(void *ptr) {
  *      copying its data, and mm_freeing the old block.
  */
 void *mm_realloc(void *old_ptr, size_t size) {
-    (void) old_ptr;
-    (void) size;
-    return NULL;
+    if ( old_ptr == NULL ) {
+	    return mm_malloc(size);
+    }
+    if ( size == 0 ) {
+	    mm_free(old_ptr);
+	    return NULL;
+    }
+    block_t *old_block = block_from_payload(old_ptr);
+    size_t old_size = get_size(old_block) - sizeof(block_t);
+    void *new_ptr = mm_malloc(size);
+    if ( new_ptr == NULL ) {
+	    return NULL;
+    }
+    size_t copy_size = old_size;
+    if ( size < copy_size ) {
+	    copy_size = size;
+    }
+    memcpy(new_ptr, old_ptr, copy_size);
+    mm_free(old_ptr);
+    return new_ptr;
 }
 
 /**
  * mm_calloc - Allocate the block and set it to zero.
  */
 void *mm_calloc(size_t nmemb, size_t size) {
-    (void) nmemb;
-    (void) size;
-    return NULL;
+    size_t total = nmemb * size;
+    if ( nmemb != 0 && total/nmemb != size ) {
+	    return NULL;
+	}
+    void * ptr = mm_malloc(total);
+    if ( ptr==NULL){
+	    return NULL;
+    }
+    memset(ptr,0,total);
+    return ptr;
+	    
 }
 
 /**
